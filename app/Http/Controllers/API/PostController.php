@@ -6,8 +6,8 @@ use App\Http\Controllers\Controller;
 use App\Models\Post;
 use App\Models\User;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Support\Facades\File;
 
 class PostController extends Controller
 {
@@ -16,6 +16,13 @@ class PostController extends Controller
      */
     public function index()
     {
+        $user = \Illuminate\Support\Facades\Auth::user();
+        if (!$user) {
+            return response()->json([
+                'status' => false,
+                'message' => 'Unauthorized. Please log in.',
+            ], 401);
+        }
         $data['posts'] = Post::all();
         return response()->json([
             'status' => true,
@@ -29,6 +36,16 @@ class PostController extends Controller
      */
     public function store(Request $request)
     {
+        // **Check Authentication**
+        $user = \Illuminate\Support\Facades\Auth::user();
+        if (!$user) {
+            return response()->json([
+                'status' => false,
+                'message' => 'Unauthorized. Please log in.',
+            ], 401);
+        }
+
+        // **Validate Request**
         $validatorUser = Validator::make($request->all(), [
             'title' => 'required',
             'description' => 'required',
@@ -39,16 +56,18 @@ class PostController extends Controller
             return response()->json([
                 'status' => false,
                 'message' => 'Validation Error',
-                'errors' => $validatorUser->error()->all(),
-            ], 401);
+                'errors' => $validatorUser->errors()->all(),
+            ], 422);
         }
 
-        $img = $request->image;
-        $ext = $img->getClientOriginalExtension();
-        $imageName = time() . '.' . $ext;
-        $img->move(public_path() . '/uploads', $imageName);
+        // **Process Image**
+        $img = $request->file('image');
+        $imageName = time() . '.' . $img->getClientOriginalExtension();
+        $img->move(public_path('uploads'), $imageName);
 
+        // **Create Post with Authenticated User**
         $post = Post::create([
+            'user_id' => $user->id,  // Ensure user association
             'title' => $request->title,
             'description' => $request->description,
             'image' => $imageName,
@@ -58,7 +77,7 @@ class PostController extends Controller
             'status' => true,
             'message' => 'Post Created Successfully',
             'post' => $post,
-        ], 200);
+        ], 201);
     }
 
     /**
@@ -66,61 +85,92 @@ class PostController extends Controller
      */
     public function show(string $id)
     {
-        $data['post'] = Post::select(
-            'id',
-            'title',
-            'description',
-            'image',
-        )->where(['id' => $id])->get();
+        // **Check Authentication**
+        $user = \Illuminate\Support\Facades\Auth::user();
+        if (!$user) {
+            return response()->json([
+                'status' => false,
+                'message' => 'Unauthorized. Please log in.',
+            ], 401);
+        }
+
+        // **Find Post**
+        $post = Post::select('id', 'title', 'description', 'image')
+            ->where('id', $id)
+            ->first();
+
+        if (!$post) {
+            return response()->json([
+                'status' => false,
+                'message' => 'Post not found',
+            ], 404);
+        }
 
         return response()->json([
             'status' => true,
-            'message' => 'your Single Post',
-            'data' => $data['post'],
+            'message' => 'Your Single Post',
+            'data' => $post,
         ], 200);
     }
+
 
     /**
      * Update the specified resource in storage.
      */
     public function update(Request $request, string $id)
     {
+        // ✅ **Check Authentication**
+        $user = \Illuminate\Support\Facades\Auth::user();
+        if (!$user) {
+            return response()->json([
+                'status' => false,
+                'message' => 'Unauthorized. Please log in.',
+            ], 401);
+        }
+
+        // ✅ **Find Post**
+        $post = Post::where('id', $id)->first();
+        if (!$post) {
+            return response()->json([
+                'status' => false,
+                'message' => 'Post not found.',
+            ], 404);
+        }
+
+        // ✅ **Validate Request**
         $validatorUser = Validator::make($request->all(), [
             'title' => 'required',
             'description' => 'required',
-            'image' => 'required|mimes:png,jpg,jpeg,gif',
+            'image' => 'nullable|mimes:png,jpg,jpeg,gif', // Image optional kiya
         ]);
 
         if ($validatorUser->fails()) {
             return response()->json([
                 'status' => false,
                 'message' => 'Validation Error',
-                'errors' => $validatorUser->error()->all(),
-            ], 401);
+                'errors' => $validatorUser->errors()->all(),
+            ], 422);
         }
 
-        $postImage = Post::select('id', 'image')->where(['id' => $id])->get();
+        // ✅ **Handle Image Upload & Delete Old Image**
+        $imageName = $post->image; // Default old image rakho
 
-        if ($request->image != "") {
-            $path = public_path() . '/uploads';
+        if ($request->hasFile('image')) {
+            $path = public_path('uploads');
 
-            if ($postImage[0]->image != "" && $postImage[0]->image != null) {
-                $old_file  = $path . $postImage[0]->image;
-                if (file_exists($old_file)) {
-                    unlink($old_file);
-                }
+            // **Delete Old Image if Exists**
+            if ($post->image && file_exists($path . '/' . $post->image)) {
+                unlink($path . '/' . $post->image);
             }
-            $img = $request->image;
-            $ext = $img->getClientOriginalExtension();
-            $imageName = time() . '.' . $ext;
-            $img->move(public_path() . '/uploads', $imageName);
-        } else {
-            $imageName = $postImage->image;
+
+            // **Upload New Image**
+            $img = $request->file('image');
+            $imageName = time() . '.' . $img->getClientOriginalExtension();
+            $img->move($path, $imageName);
         }
 
-
-
-        $post = Post::where(['id' => $id])->update([
+        // ✅ **Update Post**
+        $post->update([
             'title' => $request->title,
             'description' => $request->description,
             'image' => $imageName,
@@ -133,12 +183,21 @@ class PostController extends Controller
         ], 200);
     }
 
+
     /**
      * Remove the specified resource from storage.
      */
     public function destroy(string $id)
     {
 
+
+        $user = \Illuminate\Support\Facades\Auth::user();
+        if (!$user) {
+            return response()->json([
+                'status' => false,
+                'message' => 'Unauthorized. Please log in.',
+            ], 401);
+        }
         // Get the post image
         $post = Post::select('image')->where('id', $id)->first();
 

@@ -17,7 +17,7 @@ class AuthController extends Controller
             'email' => 'required|email|unique:users,email',
             'password' => 'required|min:6',
         ]);
-    
+
         if ($validateUser->fails()) {
             return response()->json([
                 'status' => false,
@@ -25,20 +25,20 @@ class AuthController extends Controller
                 'error' => $validateUser->errors()->all()
             ], 401);
         }
-    
+
         $user = User::create([
             'name' => $request->name,
             'email' => $request->email,
             'password' => bcrypt($request->password), // ✅ Password ko hash karna zaroori hai
         ]);
-    
+
         return response()->json([
             'status' => true,
             'message' => 'User Created Successfully',
             'user' => $user
         ], 200);
     }
-    
+
     public function login(Request $request)
     {
         $validateUser = Validator::make($request->all(), [
@@ -64,15 +64,25 @@ class AuthController extends Controller
                 'token' => $authUser->createToken("API Token")->plainTextToken,
                 'token_type' => 'bearer'
             ], 200);
-        }else{
+        } else {
             return response()->json([
                 'status' => false,
                 'message' => 'Email Or Password does not matched',
             ], 401);
         }
     }
-    public function logout(Request $request) {
+    public function logout(Request $request)
+    {
         $user = $request->user();
+
+        if (!$user) {
+            return response()->json([
+                'status' => false,
+                'message' => 'User not authenticated',
+            ], 401);
+        }
+
+        // Revoke all tokens (Laravel Sanctum)
         $user->tokens()->delete();
 
         return response()->json([
